@@ -1,0 +1,89 @@
+name: factory-mind
+version: "1.0.0"
+description: >
+  FactoryMind simulates a 70MW solar panel factory's autonomous operations brain.
+  An AI agent manages raw material inventory (silicon cells, glass, EVA encapsulant,
+  backsheet), production scheduling under capacity constraints, demand forecasting,
+  supplier risk events (monsoon delays, glass shortages), storage costs, and
+  shipment urgency to maximize profit over 15–25-step episodes.
+author: Optimal-ish
+tags:
+  - openenv
+  - solar-manufacturing
+  - supply-chain
+  - inventory-management
+  - reinforcement-learning
+tasks:
+  - id: easy_reorder
+    name: "Task 1: Basic Reorder"
+    description: >
+      Low EVA stock scenario with steady demand. Agent must identify and reorder
+      the correct raw material before stockout occurs.
+    difficulty: easy
+    max_steps: 5
+    target_score: 0.92
+  - id: medium_spike
+    name: "Task 2: Demand Spike"
+    description: >
+      Demand ramps sharply with a glass shortage. Agent must accurately forecast
+      demand and schedule production to fill 80%+ of orders without stockout.
+    difficulty: medium
+    max_steps: 10
+    target_score: 0.78
+  - id: hard_risk
+    name: "Task 3: Risk Optimization"
+    description: >
+      Supplier delay (glass +2 days), monsoon demand dip (-20%), and costs up 15%.
+      Agent must reallocate production optimally. Graded vs OR-Tools optimal profit.
+    difficulty: hard
+    max_steps: 20
+    target_score: 0.55
+  - id: full_chain
+    name: "Task 4: Full Supply Chain"
+    description: >
+      All risk events active plus a rush shipment penalty. Agent must manage
+      compounding risks across multi-horizon planning. Composite grader.
+    difficulty: expert
+    max_steps: 25
+    target_score: 0.38
+observation_space:
+  type: object
+  properties:
+    inventory:
+      type: object
+      description: "Current stock levels per material (cells, glass, eva, backsheet)"
+    demand_hist:
+      type: array
+      description: "Last 7 days of order demand in MW"
+    capacity:
+      type: number
+      description: "Daily production capacity in MW"
+    costs:
+      type: object
+      description: "Per-unit costs for each material in $/unit"
+    events:
+      type: array
+      description: "Active disruption events"
+    step_count:
+      type: integer
+    current_profit:
+      type: number
+    task_id:
+      type: string
+action_space:
+  type: object
+  properties:
+    reorder:
+      type: object
+      description: "Material reorder quantities dict e.g. {'cells': 10000}"
+    schedule_mw:
+      type: number
+      description: "MW of panels to produce this step (0–70)"
+    forecast_next_3days:
+      type: array
+      description: "Agent's demand forecast for next 3 days in MW"
+api:
+  reset: POST /reset
+  step: POST /step
+  state: GET /state
+  health: GET /health
