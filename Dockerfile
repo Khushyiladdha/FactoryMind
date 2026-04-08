@@ -19,8 +19,6 @@ COPY openenv.yaml ./
 COPY inference.py ./
 COPY test_local.py ./
 COPY README.md ./
-COPY start.sh ./
-RUN chmod +x start.sh
 
 RUN openenv validate . || echo "[INFO] openenv validate skipped"
 
