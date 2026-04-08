@@ -22,13 +22,11 @@ from openai import OpenAI
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY", "")
+API_KEY      = os.getenv("API_KEY", "")
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME   = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 ENV_BASE_URL = os.getenv("ENV_BASE_URL", "https://cherrykl-factorymind.hf.space")
-
-# NO default for HF_TOKEN (required by spec)
-HF_TOKEN = os.getenv("HF_TOKEN")
+HF_TOKEN     = os.getenv("HF_TOKEN")
 
 BENCHMARK   = "factory-mind"          # FIX 2: match project name
 TASKS       = ["easy_reorder", "medium_spike", "hard_risk", "full_chain"]
