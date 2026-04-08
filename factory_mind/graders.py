@@ -182,3 +182,19 @@ def run_grader(task_id: str, final_state: Dict[str, Any], episode_actions: List[
     score = grader(final_state, episode_actions)
     # Must be STRICTLY between 0 and 1 (not 0.0, not 1.0)
     return float(np.clip(score, 0.01, 0.99))
+
+
+# OVERRIDE run_grader with strict bounds enforcement
+def run_grader(task_id: str, final_state: Dict[str, Any], episode_actions: List[Dict]) -> float:
+    grader = GRADERS.get(task_id)
+    if grader is None:
+        raise ValueError(f"Unknown task_id: {task_id!r}. Valid: {list(GRADERS)}")
+    try:
+        score = float(grader(final_state, episode_actions))
+    except Exception:
+        score = 0.05
+    if score <= 0.0:
+        score = 0.05
+    if score >= 1.0:
+        score = 0.99
+    return round(float(np.clip(score, 0.05, 0.99)), 4)
