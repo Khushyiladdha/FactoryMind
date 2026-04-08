@@ -62,7 +62,9 @@ def health():
 
 
 @app.post("/reset")
-def reset(req: ResetRequest):
+def reset(req: ResetRequest = None):
+    if req is None:
+        req = ResetRequest()
     """Start a new episode. Returns initial observation."""
     valid = ["easy_reorder", "medium_spike", "hard_risk", "full_chain"]
     if req.task_id not in valid:
