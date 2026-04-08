@@ -37,6 +37,11 @@ _env = FactoryMindEnv()
 class ResetRequest(BaseModel):
     task_id: str = "easy_reorder"
 
+@app.post("/reset")
+def reset(req: ResetRequest = None):
+    if req is None:
+        req = ResetRequest()
+
 
 class StepRequest(BaseModel):
     reorder: Dict[str, float] = {}
