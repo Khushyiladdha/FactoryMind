@@ -10,18 +10,13 @@ import numpy as np
 from factory_mind.models import FactoryObs, FactoryAction, FactoryReward, EpisodeState
 from factory_mind.graders import run_grader
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
 MATERIALS = ["cells", "glass", "eva", "backsheet"]
 
-# Units consumed per MW produced
 USAGE_RATE: Dict[str, float] = {
-    "cells": 286.0,   # panel cells per MW
-    "glass": 2.4,     # sqm per MW
-    "eva": 2.1,       # sqm per MW
-    "backsheet": 2.1, # sqm per MW
+    "cells": 286.0,
+    "glass": 2.4,
+    "eva": 2.1,
+    "backsheet": 2.1,
 }
 
 BASE_COSTS: Dict[str, float] = {
@@ -29,16 +24,18 @@ BASE_COSTS: Dict[str, float] = {
     "glass": 0.08,
     "eva": 0.15,
     "backsheet": 0.10,
-    "storage": 0.002,  # $/unit/step carrying cost
+    "storage": 0.002,
 }
 
-PRICE_PER_MW = 280_000.0   # Revenue per MW sold
-MAX_CAPACITY = 70.0         # MW/day
+PRICE_PER_MW = 280_000.0
+MAX_CAPACITY = 70.0
 
-
-# ---------------------------------------------------------------------------
-# Task Configs
-# ---------------------------------------------------------------------------
+LOW_STOCK_THRESHOLDS: Dict[str, float] = {
+    "cells": 20_000,
+    "glass": 8_000,
+    "eva": 1_000,
+    "backsheet": 1_000,
+}
 
 TASK_CONFIGS: Dict[str, Dict[str, Any]] = {
     "easy_reorder": {
@@ -80,15 +77,8 @@ TASK_CONFIGS: Dict[str, Dict[str, Any]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Environment
-# ---------------------------------------------------------------------------
-
 class FactoryMindEnv:
-    """
-    FactoryMind OpenEnv-compliant environment.
-    All random ops seeded per task for full reproducibility.
-    """
+    """FactoryMind OpenEnv-compliant environment."""
 
     def __init__(self) -> None:
         self._state: Optional[FactoryObs] = None
@@ -99,13 +89,9 @@ class FactoryMindEnv:
         self._rush_missed: bool = False
         self._optimal_profit: Optional[float] = None
         self._task_config: Dict[str, Any] = {}
-
-    # -----------------------------------------------------------------------
-    # Public API
-    # -----------------------------------------------------------------------
+        self._prev_forecast_error: Optional[float] = None
 
     def reset(self, task_id: str = "easy_reorder") -> FactoryObs:
-        """Initialise a new episode for the given task."""
         if task_id not in TASK_CONFIGS:
             raise ValueError(f"Unknown task_id {task_id!r}. Valid: {list(TASK_CONFIGS)}")
 
@@ -115,12 +101,11 @@ class FactoryMindEnv:
         self._episode_actions = []
         self._episode_rewards = []
         self._rush_missed = False
+        self._prev_forecast_error = None
 
-        # Seed per task for reproducibility
         seed = 42 + list(TASK_CONFIGS.keys()).index(task_id)
         self._rng = np.random.default_rng(seed)
 
-        # Apply cost multiplier
         costs = {k: v * cfg["cost_multiplier"] for k, v in BASE_COSTS.items()}
 
         self._state = FactoryObs(
@@ -137,10 +122,6 @@ class FactoryMindEnv:
         return self._state
 
     def step(self, action: FactoryAction) -> Tuple[FactoryObs, float, bool, Dict[str, Any]]:
-        """
-        Execute one step. Returns (obs, reward, done, info).
-        info contains 'reward_breakdown' and on-done 'grader_score'.
-        """
         if self._state is None:
             raise RuntimeError("Call reset() before step().")
         if self._state.done:
@@ -151,12 +132,10 @@ class FactoryMindEnv:
         action_dict = action.model_dump()
         self._episode_actions.append(action_dict)
 
-        # --- 1. Apply reorders (instant delivery except during delay events)
-        delay_events = {"supplier_delay_glass", "supplier_delay_eva"}
+        # --- 1. Reorders
         delayed_materials = set()
         for ev in state.events:
             if "delay" in ev:
-                # extract material name: supplier_delay_glass -> glass
                 parts = ev.split("_")
                 if len(parts) >= 3:
                     delayed_materials.add(parts[-1])
@@ -166,50 +145,43 @@ class FactoryMindEnv:
         for mat, qty in action.reorder.items():
             qty = max(0.0, float(qty))
             if mat in delayed_materials:
-                qty *= 0.5  # partial delivery during delay
+                qty *= 0.5
             if mat in new_inventory and mat in state.costs:
                 new_inventory[mat] = new_inventory[mat] + qty
                 reorder_cost += qty * state.costs.get(mat, 0.1)
 
-        # --- 2. Production scheduling
+        # --- 2. Production
         schedule_mw = float(action.schedule_mw)
-        # Clamp by capacity
         schedule_mw = min(schedule_mw, MAX_CAPACITY)
-        # Clamp by available inventory
         for mat, rate in USAGE_RATE.items():
             max_by_mat = new_inventory.get(mat, 0.0) / rate
             schedule_mw = min(schedule_mw, max_by_mat)
         schedule_mw = max(0.0, schedule_mw)
 
-        # Consume materials
         for mat, rate in USAGE_RATE.items():
             new_inventory[mat] = max(0.0, new_inventory.get(mat, 0.0) - schedule_mw * rate)
 
-        # --- 3. Demand realisation
+        # --- 3. Demand
         base_demand = cfg["demand_hist"][-1] if cfg["demand_hist"] else 160.0
         demand_mult = cfg.get("demand_multiplier", 1.0)
         if "monsoon_dip" in state.events:
             demand_mult *= 0.7
         noise = float(self._rng.normal(0, 3.0))
         realised_demand = max(0.0, base_demand * demand_mult + noise)
-        # Append and keep last 7
         new_demand_hist = list(state.demand_hist[1:]) + [realised_demand]
 
         # --- 4. Revenue & costs
         sold_mw = min(schedule_mw, realised_demand)
         revenue = sold_mw * PRICE_PER_MW
 
-        # Storage cost
         storage_cost = sum(
             v * state.costs.get("storage", 0.002)
             for v in new_inventory.values()
         )
 
-        # Stockout penalty
         stockout_mw = max(0.0, realised_demand - schedule_mw)
-        stockout_penalty_val = stockout_mw * PRICE_PER_MW * 0.3  # lost revenue opportunity
+        stockout_penalty_val = stockout_mw * PRICE_PER_MW * 0.3
 
-        # Rush shipment check (task 4)
         rush_penalty_val = 0.0
         if "rush_shipment" in state.events and state.step_count >= cfg["max_steps"] - 3:
             if sold_mw < realised_demand * 0.9:
@@ -219,8 +191,8 @@ class FactoryMindEnv:
         profit_delta = revenue - reorder_cost - storage_cost - stockout_penalty_val - rush_penalty_val
         new_profit = state.current_profit + profit_delta
 
-        # --- 5. Dense reward signal
-        max_possible_profit = MAX_CAPACITY * PRICE_PER_MW  # upper bound per step
+        # --- 5. Dense reward
+        max_possible_profit = MAX_CAPACITY * PRICE_PER_MW
         profit_reward = float(np.clip(profit_delta / max(max_possible_profit, 1.0), -1.0, 1.0))
 
         stockout_ratio = stockout_mw / max(realised_demand, 1.0)
@@ -229,7 +201,6 @@ class FactoryMindEnv:
         overstock_units = sum(max(0.0, v - 60_000.0) for v in new_inventory.values())
         overstock_reward = -0.1 * float(np.clip(overstock_units / 100_000.0, 0.0, 1.0))
 
-        # Forecast accuracy reward
         forecast = action.forecast_next_3days
         forecast_reward = 0.0
         if len(forecast) >= 1:
@@ -237,13 +208,41 @@ class FactoryMindEnv:
             mse = float(np.mean([(p - t) ** 2 for p, t in zip(forecast, simple_true)]))
             forecast_reward = 0.1 * float(np.clip(1.0 - mse / max(realised_demand ** 2, 1.0), 0.0, 1.0))
 
+        # Urgency penalty: low stock on any critical material
+        urgency_penalty = 0.0
+        for mat, threshold in LOW_STOCK_THRESHOLDS.items():
+            if new_inventory.get(mat, 0) < threshold:
+                urgency_penalty -= 0.05
+
+        # Forecast improvement bonus
+        forecast_improvement = 0.0
+        if len(forecast) >= 1:
+            curr_forecast_error = abs(forecast[0] - realised_demand)
+            if self._prev_forecast_error is not None and curr_forecast_error < self._prev_forecast_error:
+                forecast_improvement = 0.1
+            self._prev_forecast_error = curr_forecast_error
+
+        # Proactive reorder bonus
+        proactive_bonus = 0.0
+        for mat, threshold in LOW_STOCK_THRESHOLDS.items():
+            ordered = float(action.reorder.get(mat, 0))
+            stock_before = state.inventory.get(mat, 0)
+            if ordered > 0 and stock_before < threshold * 2:
+                proactive_bonus += 0.05
+
         step_reward = float(np.clip(
-            0.4 * profit_reward + stockout_reward + overstock_reward + forecast_reward,
+            0.4 * profit_reward
+            + stockout_reward
+            + overstock_reward
+            + forecast_reward
+            + urgency_penalty
+            + forecast_improvement
+            + proactive_bonus,
             -1.0, 1.0
         ))
         self._episode_rewards.append(step_reward)
 
-        # --- 6. Episode termination
+        # --- 6. Termination
         new_step = state.step_count + 1
         done = new_step >= cfg["max_steps"]
 
@@ -260,7 +259,7 @@ class FactoryMindEnv:
             done=done,
         )
 
-        # --- 8. Grader on done
+        # --- 8. Info + grader
         info: Dict[str, Any] = {
             "reward_breakdown": FactoryReward(
                 total=step_reward,
@@ -285,7 +284,6 @@ class FactoryMindEnv:
         return self._state, step_reward, done, info
 
     def state(self) -> EpisodeState:
-        """Return full current episode state."""
         if self._state is None:
             raise RuntimeError("Call reset() first.")
         return EpisodeState(
