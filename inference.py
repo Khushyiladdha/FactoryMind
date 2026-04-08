@@ -1,70 +1,39 @@
 """
-inference.py — FactoryMind Baseline Inference Script
-
-MANDATORY env vars:
-  API_BASE_URL      LLM endpoint
-  MODEL_NAME        Model identifier
-  HF_TOKEN          HuggingFace / API key (NO default)
-
-Stdout format (STRICT):
-  [START] task=<n> env=<benchmark> model=<model>
-  [STEP]  step=<n> action=<str> reward=<0.00> done=<true|false> error=<msg|null>
-  [END]   success=<true|false> steps=<n> rewards=<r1,r2,...>
+FactoryMind Baseline Inference Script
 """
-
 import json
 import os
 import time
-
 import requests
 from openai import OpenAI
 
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-API_KEY      = os.environ["API_KEY"]
+# CRITICAL: use exactly what hackathon injects
+API_KEY      = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN", "")
 API_BASE_URL = os.environ["API_BASE_URL"]
 MODEL_NAME   = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-ENV_BASE_URL = os.getenv("ENV_BASE_URL", "https://cherrykl-factorymind.hf.space")
+ENV_BASE_URL = os.environ.get("ENV_BASE_URL", "https://cherrykl-factorymind.hf.space")
 
-BENCHMARK   = "factory-mind"          # FIX 2: match project name
-TASKS       = ["easy_reorder", "medium_spike", "hard_risk", "full_chain"]
-MAX_STEPS   = 25                       # FIX 3: match longest task
+BENCHMARK  = "factory_mind"
+TASKS      = ["easy_reorder", "medium_spike", "hard_risk", "full_chain"]
+MAX_STEPS  = 25
 TEMPERATURE = 0.3
 MAX_TOKENS  = 256
 
-# ---------------------------------------------------------------------------
-# OpenAI client
-# ---------------------------------------------------------------------------
+# OpenAI client pointing at hackathon LiteLLM proxy
 client = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
 
-# ---------------------------------------------------------------------------
-# Env HTTP helpers
-# ---------------------------------------------------------------------------
 
 def env_reset(task_id: str) -> dict:
-    r = requests.post(
-        f"{ENV_BASE_URL}/reset",
-        json={"task_id": task_id},
-        timeout=30,
-    )
+    r = requests.post(f"{ENV_BASE_URL}/reset", json={"task_id": task_id}, timeout=30)
     r.raise_for_status()
     return r.json()
 
 
 def env_step(action: dict) -> dict:
-    r = requests.post(
-        f"{ENV_BASE_URL}/step",
-        json=action,                   # FastAPI expects flat action fields directly
-        timeout=30,
-    )
+    r = requests.post(f"{ENV_BASE_URL}/step", json=action, timeout=30)
     r.raise_for_status()
     return r.json()
 
-
-# ---------------------------------------------------------------------------
-# Stdout log helpers — EXACT format
-# ---------------------------------------------------------------------------
 
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
@@ -73,25 +42,14 @@ def log_start(task: str, env: str, model: str) -> None:
 def log_step(step: int, action: str, reward: float, done: bool, error) -> None:
     done_str  = "true" if done else "false"
     error_str = str(error) if error else "null"
-    print(
-        f"[STEP] step={step} action={action} "
-        f"reward={reward:.2f} done={done_str} error={error_str}",
-        flush=True,
-    )
+    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_str} error={error_str}", flush=True)
 
 
 def log_end(success: bool, steps: int, rewards: list) -> None:
     success_str = "true" if success else "false"
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
-    print(
-        f"[END] success={success_str} steps={steps} rewards={rewards_str}",
-        flush=True,
-    )
+    print(f"[END] success={success_str} steps={steps} rewards={rewards_str}", flush=True)
 
-
-# ---------------------------------------------------------------------------
-# Prompt
-# ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """You are an autonomous AI agent managing a 70MW solar panel factory.
 Maximize profit by managing raw material reorders, production scheduling, and demand forecasting.
@@ -125,7 +83,7 @@ def parse_action(text: str) -> dict:
     text = text.strip()
     for fence in ["```json", "```"]:
         if fence in text:
-            text = text.split(fence)[-1].split("```")[0].strip()
+            text = text.split(fence)[-1].split("```")[0].strip()  # FIX: [0] not .strip() on list
     try:
         a = json.loads(text)
         return {
@@ -137,10 +95,6 @@ def parse_action(text: str) -> dict:
     except Exception:
         return {"reorder": {}, "schedule_mw": 40.0, "forecast_next_3days": [160.0, 160.0, 160.0]}
 
-
-# ---------------------------------------------------------------------------
-# Single episode
-# ---------------------------------------------------------------------------
 
 def run_episode(task_id: str) -> dict:
     obs     = env_reset(task_id)
@@ -159,7 +113,7 @@ def run_episode(task_id: str) -> dict:
 
         try:
             history.append({"role": "user", "content": build_prompt(obs)})
-            context = history[-4:]  # keep context small for performance
+            context = history[-4:]
 
             resp = client.chat.completions.create(
                 model=MODEL_NAME,
@@ -167,7 +121,7 @@ def run_episode(task_id: str) -> dict:
                 temperature=TEMPERATURE,
                 max_tokens=MAX_TOKENS,
             )
-            raw = (resp.choices[0].message.content or "").strip()
+            raw = (resp.choices[0].message.content or "").strip()  # FIX: choices[0]
             history.append({"role": "assistant", "content": raw})
             action = parse_action(raw)
             action_str = json.dumps(action, separators=(",", ":"))
@@ -194,16 +148,11 @@ def run_episode(task_id: str) -> dict:
         rewards.append(reward)
         log_step(step=steps, action=action_str, reward=reward, done=done, error=last_error)
 
-    success = bool(done)              # FIX 1: success = task completed, not custom threshold
+    success = bool(done)
     log_end(success=success, steps=steps, rewards=rewards)
     print("", flush=True)
-
     return {"task_id": task_id, "grader_score": grader, "steps": steps, "success": success}
 
-
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 
 def main() -> None:
     results = []
