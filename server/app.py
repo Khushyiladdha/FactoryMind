@@ -37,11 +37,6 @@ _env = FactoryMindEnv()
 class ResetRequest(BaseModel):
     task_id: str = "easy_reorder"
 
-@app.post("/reset")
-def reset(req: ResetRequest = None):
-    if req is None:
-        req = ResetRequest()
-
 
 class StepRequest(BaseModel):
     reorder: Dict[str, float] = {}
@@ -118,9 +113,13 @@ def list_tasks():
         ]
     }
 
+
 def main():
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=7860)
+
+# Alias for openenv-core discovery
+application = app
 
 if __name__ == "__main__":
     main()

@@ -11,7 +11,7 @@ from openai import OpenAI
 API_KEY      = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN", "")
 API_BASE_URL = os.environ["API_BASE_URL"]
 MODEL_NAME   = os.environ.get("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-ENV_BASE_URL = os.environ.get("ENV_BASE_URL", "https://cherrykl-factorymind.hf.space")
+ENV_BASE_URL = os.environ.get("ENV_BASE_URL", "http://localhost:7860")
 
 BENCHMARK  = "factory_mind"
 TASKS      = ["easy_reorder", "medium_spike", "hard_risk", "full_chain"]
