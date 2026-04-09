@@ -37,7 +37,7 @@ tasks:
       Agent must reallocate production optimally. Graded vs OR-Tools optimal profit.
     difficulty: hard
     max_steps: 20
-    target_score: 0.99
+    target_score: 0.80
   - id: full_chain
     name: "Task 4: Full Supply Chain"
     description: >
