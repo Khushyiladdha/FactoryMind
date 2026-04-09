@@ -230,16 +230,19 @@ class FactoryMindEnv:
             if ordered > 0 and stock_before < threshold * 2:
                 proactive_bonus += 0.05
 
-        step_reward = float(np.clip(
+        raw_reward = (
             0.4 * profit_reward
             + stockout_reward
             + overstock_reward
             + forecast_reward
             + urgency_penalty
             + forecast_improvement
-            + proactive_bonus,
-            -1.0, 1.0
-        ))
+            + proactive_bonus
+        )
+        step_reward = float(np.clip(raw_reward, -0.99, 0.99))
+        if step_reward == 0.0:
+            step_reward = 0.01
+        step_reward = round(step_reward, 4)
         self._episode_rewards.append(step_reward)
 
         # --- 6. Termination
