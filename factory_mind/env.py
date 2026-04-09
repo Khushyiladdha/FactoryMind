@@ -270,6 +270,7 @@ class FactoryMindEnv:
                 stockout_penalty=-stockout_reward,
                 overstock_penalty=-overstock_reward,
                 forecast_accuracy=forecast_reward,
+                grader_score=0.5,
             ).model_dump(),
             "realised_demand": realised_demand,
             "sold_mw": sold_mw,
@@ -281,9 +282,11 @@ class FactoryMindEnv:
             final_state_dict["_episode_rewards"] = self._episode_rewards
             final_state_dict["_rush_missed"] = self._rush_missed
             grader_score = run_grader(self._task_id, final_state_dict, self._episode_actions)
-            # Strictly between 0 and 1 — never exactly 0.0 or 1.0
-            grader_score = float(np.clip(grader_score, 0.01, 0.99))
+            # Epsilon bounding — strictly in (0, 1)
+            grader_score = float(np.clip(float(grader_score), 1e-4, 1.0 - 1e-4))
             info["grader_score"] = grader_score
+            # Also update reward_breakdown grader_score
+            info["reward_breakdown"]["grader_score"] = grader_score
             self._state = FactoryObs(**{**self._state.model_dump()})
 
         return self._state, step_reward, done, info
