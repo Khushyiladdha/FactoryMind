@@ -7,6 +7,18 @@ import time
 import requests
 from openai import OpenAI
 
+_EPS = 1e-4
+
+def _safe_grader(v) -> float:
+    """Clamp to open interval (0, 1) — never 0.0 or 1.0."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        f = _EPS
+    if f != f:  # NaN
+        f = _EPS
+    return max(_EPS, min(1.0 - _EPS, f))
+
 # CRITICAL: use exactly what hackathon injects
 API_KEY      = os.environ.get("API_KEY") or os.environ.get("HF_TOKEN", "")
 API_BASE_URL = os.environ["API_BASE_URL"]
@@ -143,7 +155,7 @@ def run_episode(task_id: str) -> dict:
             last_error = str(e)[:100]
             reward = 0.0
             done   = True
-            grader = 0.0
+            grader = _EPS
 
         rewards.append(reward)
         log_step(step=steps, action=action_str, reward=reward, done=done, error=last_error)
@@ -151,7 +163,7 @@ def run_episode(task_id: str) -> dict:
     success = bool(done)
     log_end(success=success, steps=steps, rewards=rewards)
     print("", flush=True)
-    return {"task_id": task_id, "grader_score": grader, "steps": steps, "success": success}
+    return {"task_id": task_id, "grader_score": _safe_grader(grader), "steps": steps, "success": success}
 
 
 def main() -> None:
@@ -161,14 +173,14 @@ def main() -> None:
             results.append(run_episode(task_id))
         except Exception as e:
             log_end(success=False, steps=0, rewards=[])
-            results.append({"task_id": task_id, "grader_score": 0.0, "success": False})
+            results.append({"task_id": task_id, "grader_score": _EPS, "success": False})
         time.sleep(1)
 
     print("\n=== FactoryMind Baseline Results ===", flush=True)
     print(f"{'Task':<20} {'Score':>8} {'Success':>9}", flush=True)
     print("-" * 42, flush=True)
     for r in results:
-        score = r.get("grader_score") or 0.0
+        score = _safe_grader(r.get("grader_score"))
         print(f"{r['task_id']:<20} {score:>8.4f} {str(r.get('success', False)):>9}", flush=True)
 
 
