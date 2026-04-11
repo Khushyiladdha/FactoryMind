@@ -85,35 +85,58 @@ def grade_easy_reorder(final_state: Dict[str, Any], episode_actions: List[Dict])
 
 
 def grade_medium_spike(final_state: Dict[str, Any], episode_actions: List[Dict]) -> float:
+    """Grade demand-spike task. Rewards forecasting, production, and glass reorder.
+
+    Scoring breakdown (designed so a reasonable LLM agent scores ~0.50-0.65):
+      - Forecast accuracy:  30% weight, generous partial credit
+      - Production fill:    30% weight, lower target (50% of demand)
+      - Glass reorder:      fixed 0.10 bonus for any glass order
+      - Scheduling effort:  fixed 0.08 bonus for any production > 0
+      - Forecast attempt:   fixed 0.05 bonus for providing any forecast
+    Max theoretical: 0.30*0.88 + 0.30*0.88 + 0.10 + 0.08 + 0.05 = 0.758
+    """
     true_demand = [200.0, 240.0, 220.0]
-    true_var = float(np.var(true_demand)) if float(np.var(true_demand)) > 0 else 100.0
 
     best_fc = 0.0
+    made_any_forecast = False
     total_sched = 0.0
+
+    mean_demand = float(np.mean(true_demand))
+    # Normalize MSE relative to demand scale, not variance
+    # This way forecasts within ~30% of true values score well
+    forecast_norm = mean_demand ** 2 * 0.1
 
     for action in episode_actions:
         fc = action.get("forecast_next_3days", [])
         if len(fc) >= 3:
+            made_any_forecast = True
             mse = _mse(fc, true_demand)
-            # Cap accuracy at 0.88 to avoid 1.0
-            acc = float(np.clip(1.0 - mse / max(true_var, 1.0), 0.0, 0.88))
+            normalized = 1.0 - mse / max(forecast_norm, 1.0)
+            acc = float(np.clip(normalized, 0.10, 0.88))
             best_fc = max(best_fc, acc)
         elif len(fc) >= 1:
-            best_fc = max(best_fc, 0.25)
+            made_any_forecast = True
+            # Partial credit just for trying with fewer values
+            best_fc = max(best_fc, 0.30)
+
         total_sched += float(action.get("schedule_mw", 0.0))
 
-    target = sum(true_demand) * 0.6
+    # Fill rate: lower target (50% of demand instead of 60%)
+    target = sum(true_demand) * 0.50
     fill = _safe_div(total_sched, target)
-    fill = float(np.clip(fill, EPSILON, 0.88))  # cap at 0.88
+    fill = float(np.clip(fill, EPSILON, 0.88))
 
+    # Bonuses
     glass_bonus = 0.0
     for action in episode_actions:
         if float(action.get("reorder", {}).get("glass", 0)) > 0:
-            glass_bonus = 0.07
+            glass_bonus = 0.10
             break
 
-    # Max: 0.44*0.88 + 0.44*0.88 + 0.07 = 0.8452 — well under 1.0
-    raw = 0.44 * best_fc + 0.44 * fill + glass_bonus
+    scheduling_bonus = 0.08 if total_sched > 0 else 0.0
+    forecast_bonus = 0.05 if made_any_forecast else 0.0
+
+    raw = 0.30 * best_fc + 0.30 * fill + glass_bonus + scheduling_bonus + forecast_bonus
     return _bound(raw)
 
 
@@ -158,8 +181,6 @@ def grade_full_chain(final_state: Dict[str, Any], episode_actions: List[Dict]) -
     bonus   = 0.03 if has_reorder else 0.0
     penalty = 0.03 if final_state.get("_rush_missed", False) else 0.0
 
-    # Each sub is in (EPSILON, 1-EPSILON), multiplied by 0.22 each
-    # Max: (1-EPSILON)*0.22*4 + 0.03 = 0.88 + 0.03 = 0.91 < 1.0
     raw = 0.22 * easy + 0.22 * med + 0.22 * hard + 0.22 * sharpe + bonus - penalty
     return _bound(raw)
 
@@ -180,10 +201,12 @@ def run_grader(task_id: str, final_state: Dict[str, Any], episode_actions: List[
     grader = GRADERS.get(task_id)
     if grader is None:
         raise ValueError(f"Unknown task_id: {task_id!r}. Valid: {list(GRADERS)}")
+
     try:
         score = grader(final_state, episode_actions)
     except Exception:
         score = 0.5  # safe fallback, never 0 or 1
+
     # Final guarantee — single _bound call
     result = _bound(score)
     # Hard assert for safety
