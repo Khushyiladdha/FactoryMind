@@ -41,10 +41,10 @@ All scores reproducible within ±0.01 (seeded `np.random.default_rng(42 + task_i
 
 | # | Task ID | Description | Difficulty | Max Steps | Baseline Score |
 |---|---------|-------------|------------|-----------|----------------|
-| 1 | `easy_reorder` | Low EVA stock, steady demand — identify and reorder correctly | Easy | 5 | **0.77** |
-| 2 | `medium_spike` | Demand ramps sharply, glass shortage — forecast + schedule | Medium | 10 | **0.45** |
-| 3 | `hard_risk` | Supplier delay + monsoon dip + cost spike — beat OR-Tools | Hard | 20 | **0.99** |
-| 4 | `full_chain` | All events + rush shipment — multi-horizon risk management | Expert | 25 | **0.61** |
+| 1 | `easy_reorder` | Low EVA stock, steady demand — identify and reorder correctly | Easy | 5 | **0.73** |
+| 2 | `medium_spike` | Demand ramps sharply, glass shortage — forecast + schedule | Medium | 10 | **0.38** |
+| 3 | `hard_risk` | Supplier delay + monsoon dip + cost spike — beat OR-Tools | Hard | 20 | **0.88** |
+| 4 | `full_chain` | All events + rush shipment — multi-horizon risk management | Expert | 25 | **0.48** |
 
 ---
 
